@@ -82,10 +82,10 @@ class Script(scripts.Script):
             msg = "prompt_morph: at least 2 prompts required"
             print(msg)
             return Processed(p, [], p.seed, info=msg)
-        if len(prompts) > 2 and mode_select == "img2img morph":
-            msg = "prompt_morph: More than 2 prompts not yet supported for img2img mode."
-            print(msg)
-            return Processed(p, [], p.seed, info=msg)
+        #if len(prompts) > 2 and mode_select == "img2img morph":
+        #    msg = "prompt_morph: More than 2 prompts not yet supported for img2img mode."
+        #    print(msg)
+        #    return Processed(p, [], p.seed, info=msg)
 
         state.job_count = 1 + (n_images - 1) * (len(prompts) - 1)
 
@@ -144,7 +144,9 @@ class Script(scripts.Script):
                 if start_seed == '-1':
                     start_seed = -1
                 p.seed = start_seed
+                i2i_p.seed = start_seed
             processing.fix_seed(p)
+            processing.fix_seed(i2i_p)
 
             if target_seed == '':
                 p.subseed = p.seed
@@ -152,13 +154,16 @@ class Script(scripts.Script):
                 if target_seed == '-1':
                     target_seed = -1
                 p.subseed = target_seed
-            processing.fix_seed(p)
+                i2i_p.subseed = target_seed
+            processing.fix_seed(i2i_p)
             p.subseed_strength = 0
 
             # one image for each interpolation step (including start and end)
             for i in range(n_images):
                 # first image is same as last of previous morph
                 if i == 0 and n > 1:
+                    if mode_select == "img2img morph":
+                        i2i_p.init_images[0] = all_images[-1]
                     continue
                 state.job = f"Morph {n}/{len(prompts)-1}, image {i+1}/{n_images}"
 
