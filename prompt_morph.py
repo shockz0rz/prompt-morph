@@ -47,7 +47,7 @@ class Script(scripts.Script):
                                                                                                          txt2img morph will interpolate between two independently generated images - good for morphing between two pics with very different subjects.\n\
                                                                                                          img2img morph will generate one image, then interpolate between the original and an img2img derivative of it - good for maintaining a consistent subject with only smaller details changed.")
         prompt_list = gr.TextArea(label="Prompt list", placeholder="Enter one prompt per line. Blank lines will be ignored.")
-        #TODO: Separate negative prompts (I've tried it, it works!)
+        negative_prompt_list = gr.TextArea(label="Negative prompt list", placeholder="Enter negative prompts if desired, one per line. If number of positive prompts is greater than the number of negative prompts, the last negative prompt (if any) will be applied to remaining positive prompts.")
         n_images = gr.Slider(minimum=2, maximum=256, value=25, step=1, label="Number of images between keyframes")
         save_video = gr.Checkbox(label='Save results as video', value=True)
         video_fps = gr.Number(label='Frames per second', value=5)
@@ -59,14 +59,15 @@ class Script(scripts.Script):
         gradual_cfg = gr.Checkbox(value=False, label="Gradually increase CFG scale - helps with preventing artifacting/'deepfrying' on img2img gens with low denoising strength.")
         min_i2i_cfg = gr.Slider(minimum=1, maximum=30, value=7, label="CFG scale for first img2img step (ignored if only 2 images requested)")
         max_i2i_cfg = gr.Slider(minimum=1, maximum=30, value=7, label="CFG scale for final img2img step (used for all i2i gens if gradual CFG not selected)")
-        return [i1, prompt_list, mode_select, n_images, save_video, video_fps, min_denoise_str, max_denoise_str, alt_i2i_cfg, gradual_cfg, min_i2i_cfg, max_i2i_cfg]
+        return [i1, prompt_list, negative_prompt_list, mode_select, n_images, save_video, video_fps, min_denoise_str, max_denoise_str, alt_i2i_cfg, gradual_cfg, min_i2i_cfg, max_i2i_cfg]
 
-    def run(self, p, i1, prompt_list, mode_select, n_images, save_video, video_fps, min_denoise_str, max_denoise_str, alt_i2i_cfg, gradual_cfg, min_i2i_cfg, max_i2i_cfg):
+    def run(self, p, i1, prompt_list, negative_prompt_list, mode_select, n_images, save_video, video_fps, min_denoise_str, max_denoise_str, alt_i2i_cfg, gradual_cfg, min_i2i_cfg, max_i2i_cfg):
         # override batch count and size
         p.batch_size = 1
         p.n_iter = 1
 
         prompts = []
+        negative_prompts = []
         for line in prompt_list.splitlines():
             line = line.strip()
             if line == '':
@@ -78,14 +79,22 @@ class Script(scripts.Script):
                 seed, prompt = prompt_args
             prompts.append((seed.strip(), prompt.strip()))
 
+        if len(negative_prompt_list.splitlines()) > 0:
+            for line in negative_prompt_list.splitlines():
+                line = line.strip()
+                if line == '':
+                    continue
+                negative_prompts.append(line)
+        else:
+            #iffy on this - does it make more sense to grab the normal negative prompt field or to ignore it?
+            negative_prompts.append(p.negative_prompt)
+        while len(negative_prompts) < len(prompts):
+                negative_prompts.append(negative_prompts[-1])
+
         if len(prompts) < 2:
             msg = "prompt_morph: at least 2 prompts required"
             print(msg)
             return Processed(p, [], p.seed, info=msg)
-        #if len(prompts) > 2 and mode_select == "img2img morph":
-        #    msg = "prompt_morph: More than 2 prompts not yet supported for img2img mode."
-        #    print(msg)
-        #    return Processed(p, [], p.seed, info=msg)
 
         state.job_count = 1 + (n_images - 1) * (len(prompts) - 1)
 
@@ -135,9 +144,13 @@ class Script(scripts.Script):
         for n in range(1, len(prompts)):
             # parsed prompts
             start_seed, start_prompt = prompts[n-1]
+            start_neg_prompt = negative_prompts[n-1]
             target_seed, target_prompt = prompts[n]
+            target_neg_prompt = negative_prompts[n]
             res_indexes, prompt_flat_list, prompt_indexes = prompt_parser.get_multicond_prompt_list([start_prompt, target_prompt])
+            neg_res_indexes, neg_prompt_flat_list, neg_prompt_indexes = prompt_parser.get_multicond_prompt_list([start_neg_prompt, target_neg_prompt])
             prompt_weights, target_weights = res_indexes
+            neg_prompt_weights, neg_target_weights = neg_res_indexes
 
             # fix seeds. interpret '' as use previous seed
             if start_seed != '':
@@ -172,7 +185,10 @@ class Script(scripts.Script):
                 t = i / (n_images - 1)
                 scaled_prompt = prompt_at_t(prompt_weights, prompt_flat_list, 1.0 - t)
                 scaled_target = prompt_at_t(target_weights, prompt_flat_list, t)
+                scaled_negative_prompt = prompt_at_t(neg_prompt_weights, neg_prompt_flat_list, 1.0 - t)
+                scaled_negative_target = prompt_at_t(neg_target_weights, neg_prompt_flat_list, t)
                 p.prompt = f'{scaled_prompt} AND {scaled_target}'
+                p.negative_prompt = f'{scaled_negative_prompt} AND {scaled_negative_target}'
                 if p.seed != p.subseed:
                     p.subseed_strength = t
                     i2i_p.subseed_strength = t
@@ -181,6 +197,7 @@ class Script(scripts.Script):
                     processed = process_images(p)
                 else:
                     i2i_p.prompt = p.prompt
+                    i2i_p.negative_prompt = p.negative_prompt
                     if n_images > 2:
                         i2i_t = (i - 1) / (n_images - 2)
                     else:
