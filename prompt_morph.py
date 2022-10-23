@@ -157,17 +157,16 @@ class Script(scripts.Script):
                 if start_seed == '-1':
                     start_seed = -1
                 p.seed = start_seed
-                i2i_p.seed = start_seed
             processing.fix_seed(p)
-            processing.fix_seed(i2i_p)
 
             if target_seed == '':
                 p.subseed = p.seed
+                i2i_p.seed = p.seed
             else:
                 if target_seed == '-1':
                     target_seed = -1
                 p.subseed = target_seed
-                i2i_p.subseed = target_seed
+                i2i_p.seed = target_seed
             processing.fix_seed(i2i_p)
             p.subseed_strength = 0
 
@@ -189,9 +188,8 @@ class Script(scripts.Script):
                 scaled_negative_target = prompt_at_t(neg_target_weights, neg_prompt_flat_list, t)
                 p.prompt = f'{scaled_prompt} AND {scaled_target}'
                 p.negative_prompt = f'{scaled_negative_prompt} AND {scaled_negative_target}'
-                if p.seed != p.subseed:
+                if p.seed != p.subseed and mode_select == "txt2img morph":
                     p.subseed_strength = t
-                    i2i_p.subseed_strength = t
                 
                 if i == 0 or mode_select != "img2img morph":
                     processed = process_images(p)
